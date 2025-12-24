@@ -8,7 +8,6 @@ from flask_cors import CORS
 from threading import Thread
 from PIL import Image, ImageDraw, ImageOps
 
-# --- الإعدادات ---
 token = os.getenv('DISCORD_TOKEN')
 RULES_CHANNEL_ID = 1448638848513871872
 
@@ -20,12 +19,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 app = Flask(__name__)
 CORS(app)
 
-# إعدادات الترحيب الافتراضية
+# إعدادات الترحيب
 welcome_config = {
     "channel_id": None,
-    "x": 433,
-    "y": 235,
-    "bg_url": "https://i.ibb.co/m5m8Z8Y/welcome-bg.jpg" # رابط الصورة الافتراضي
+    "x": 0,
+    "y": 0,
+    "bg_url": "https://i.ibb.co/m5m8Z8Y/welcome-bg.jpg"
 }
 
 @app.route('/get_channels')
@@ -37,43 +36,48 @@ def get_channels():
 @app.route('/save_welcome_settings', methods=['POST'])
 def save_settings():
     global welcome_config
-    data = request.json
-    welcome_config.update(data)
-    welcome_config["channel_id"] = int(data['channel_id'])
+    welcome_config.update(request.json)
+    welcome_config["channel_id"] = int(request.json['channel_id'])
     return jsonify({"status": "success"})
 
 @bot.event
 async def on_member_join(member):
     if not welcome_config["channel_id"]: return
-    
     channel = bot.get_channel(welcome_config["channel_id"])
     if not channel: return
 
     try:
-        # جلب خلفية الترحيب
+        # جلب الصور
         bg_res = requests.get(welcome_config["bg_url"])
         bg = Image.open(io.BytesIO(bg_res.content)).convert("RGBA")
         
-        # جلب صورة البروفايل
         pfp_res = requests.get(member.display_avatar.url)
         pfp = Image.open(io.BytesIO(pfp_res.content)).convert("RGBA")
         
-        # جعل البروفايل دائري
-        size = (210, 210) 
-        pfp = pfp.resize(size, Image.LANCZOS)
-        mask = Image.new('L', size, 0)
+        # تصغير البروفايل ليناسب الدائرة (تم ضبط الحجم ليكون متناسقاً)
+        pfp_size = (180, 180) 
+        pfp = pfp.resize(pfp_size, Image.LANCZOS)
+        
+        mask = Image.new('L', pfp_size, 0)
         draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0) + size, fill=255)
+        draw.ellipse((0, 0) + pfp_size, fill=255)
         pfp_circle = ImageOps.fit(pfp, mask.size, centering=(0.5, 0.5))
         pfp_circle.putalpha(mask)
 
-        # دمج الصور بناءً على إحداثيات الموقع
+        # دمج الصورة في المكان المحدد
         bg.paste(pfp_circle, (int(welcome_config['x']), int(welcome_config['y'])), pfp_circle)
 
         with io.BytesIO() as img_bin:
             bg.save(img_bin, 'PNG')
             img_bin.seek(0)
-            text = f"مرحبا بك {member.mention}\nشكرا لانضمامك لـ **{member.guild.name}**\nعددنا الآن: **{member.guild.member_count}**\nقوانيننا: <#{RULES_CHANNEL_ID}>"
+            
+            # تم إصلاح النص هنا ليظهر العدد بشكل صحيح
+            member_count = member.guild.member_count
+            text = (f"مرحبا بك {member.mention}\n"
+                    f"شكرا لانضمامك لـ **{member.guild.name}**\n"
+                    f"عددنا الآن بعد دخولك: **{member_count}**\n"
+                    f"لا تنسى قراءة القوانين: <#{RULES_CHANNEL_ID}>")
+            
             await channel.send(text, file=discord.File(fp=img_bin, filename='welcome.png'))
     except Exception as e:
         print(f"Error: {e}")
