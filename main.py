@@ -9,8 +9,9 @@ from flask_cors import CORS
 from threading import Thread
 from PIL import Image, ImageDraw, ImageOps
 
-# --- الإعدادات الثابتة ---
+# --- الإعدادات الثابتة (تعديل الروابط والـ IDs هنا) ---
 token = os.getenv('DISCORD_TOKEN')
+WELCOME_BG_URL = "https://i.ibb.co/m5m8Z8Y/welcome-bg.jpg" # رابط صورتك الثابتة
 RULES_CHANNEL_ID = 1448638848513871872
 TICKET_CHANNEL_ID = 1448638848803405846
 LOG_CHANNEL_ID = 1449057792739508425
@@ -26,13 +27,12 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 app = Flask(__name__)
-# هذا السطر يحل مشكلة "فشل الإرسال" نهائياً
-CORS(app, resources={r"/*": {"origins": "*"}})
+CORS(app)
 
-welcome_config = {"channel_id": None, "bg_url": "https://i.ibb.co/m5m8Z8Y/welcome-bg.jpg"}
+welcome_config = {"channel_id": None}
 ticket_counter = 1
 
-# --- كلاسات التكت ---
+# --- أنظمة التذاكر ---
 class CloseTicketModal(ui.Modal, title='سبب إغلاق التذكرة'):
     reason = ui.TextInput(label='السبب', style=discord.TextStyle.paragraph, min_length=5, required=True)
     async def on_submit(self, interaction: discord.Interaction):
@@ -74,18 +74,19 @@ class TicketTypeSelect(ui.Select):
         embed = discord.Embed(title=f"تذكرة {t_names[t_type]}", description="انتظر الرد الإداري.", color=0x5865F2)
         embed.set_image(url="https://i.ibb.co/9HfG0Lz5/Picsart-25-12-25-15-08-29-765.jpg")
         await channel.send(content=f"{interaction.user.mention} | الإدارة", embed=embed, view=TicketControlView())
-        await interaction.response.send_message(f"تم فتح التكت: {channel.mention}", ephemeral=True, delete_after=3)
+        await interaction.response.send_message(f"✅ تم فتح التكت: {channel.mention}", ephemeral=True, delete_after=3)
 
 class TicketMainView(ui.View):
     def __init__(self):
         super().__init__(timeout=None)
         self.add_item(TicketTypeSelect())
 
+# --- أحداث البوت ---
 @bot.event
 async def on_ready():
     bot.add_view(TicketMainView())
     bot.add_view(TicketControlView())
-    print("Bot is ready")
+    print(f"Bot {bot.user} is online!")
 
 @bot.event
 async def on_message(message):
@@ -100,7 +101,7 @@ async def on_member_join(member):
     if not welcome_config["channel_id"]: return
     channel = bot.get_channel(int(welcome_config["channel_id"]))
     try:
-        bg_res = requests.get(welcome_config["bg_url"])
+        bg_res = requests.get(WELCOME_BG_URL)
         bg = Image.open(io.BytesIO(bg_res.content)).convert("RGBA")
         pfp_res = requests.get(member.display_avatar.url)
         pfp = Image.open(io.BytesIO(pfp_res.content)).convert("RGBA")
@@ -108,7 +109,7 @@ async def on_member_join(member):
         mask = Image.new('L', (271, 271), 0)
         ImageDraw.Draw(mask).ellipse((0, 0, 271, 271), fill=255)
         pfp.putalpha(mask)
-        bg.paste(pfp, (627, 196), pfp)
+        bg.paste(pfp, (627, 196), pfp) # إحداثياتك 2K
         with io.BytesIO() as out:
             bg.save(out, format="PNG")
             out.seek(0)
@@ -123,7 +124,7 @@ def get_ch():
 @app.route('/setup_ticket', methods=['POST'])
 def setup_tkt():
     channel = bot.get_channel(TICKET_CHANNEL_ID)
-    embed = discord.Embed(title="🎫 نظام التذاكر", description="اختر نوع القسم لفتح تذكرة.", color=0x2b2d31)
+    embed = discord.Embed(title="🎫 نظام التذاكر", description="اختر القسم المناسب لفتح تذكرة جديدة.", color=0x2b2d31)
     embed.set_image(url="https://i.ibb.co/9HfG0Lz5/Picsart-25-12-25-15-08-29-765.jpg")
     bot.loop.create_task(channel.send(embed=embed, view=TicketMainView()))
     return jsonify({"status": "ok"})
@@ -134,6 +135,13 @@ def send_emb():
     channel = bot.get_channel(int(data['channel_id']))
     embed = discord.Embed(title=data['title'], description=data['description'], color=int(data['color'].lstrip('#'), 16))
     bot.loop.create_task(channel.send(embed=embed))
+    return jsonify({"status": "ok"})
+
+@app.route('/send_normal_msg', methods=['POST'])
+def send_norm():
+    data = request.json
+    channel = bot.get_channel(int(data['channel_id']))
+    bot.loop.create_task(channel.send(data['message']))
     return jsonify({"status": "ok"})
 
 @app.route('/save_welcome', methods=['POST'])
